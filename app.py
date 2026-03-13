@@ -1,23 +1,30 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import io
+import google.generativeai as genai
+import os
 
 app = Flask(__name__)
+
+# -------- GEMINI SETUP -------- #
+
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
+model = genai.GenerativeModel("gemini-1.5-flash")
+
 
 # -------- DATA CLEANING -------- #
 
 def clean_data(df):
 
-    # remove duplicates
     df = df.drop_duplicates()
 
-    # fill missing numeric values
+    # numeric missing
     for col in df.select_dtypes(include=np.number):
         df[col] = df[col].fillna(df[col].median())
 
-    # fill missing categorical values
+    # categorical missing
     for col in df.select_dtypes(include="object"):
         df[col] = df[col].fillna(df[col].mode()[0])
 
@@ -28,7 +35,7 @@ def clean_data(df):
 
 def remove_outliers(df):
 
-    numeric_cols = df.select_dtypes(include=np.number).columns
+    numeric_cols = df.select_dtypes(include=np.number)
 
     for col in numeric_cols:
 
@@ -45,42 +52,87 @@ def remove_outliers(df):
     return df
 
 
-# -------- PROMPT INTERPRETER -------- #
+# -------- GEMINI PROMPT UNDERSTANDING -------- #
 
-def interpret_prompt(prompt):
+def interpret_prompt(prompt, columns):
 
-    prompt = prompt.lower()
+    context = f"""
+You are a professional data analyst.
 
-    if "chart" in prompt or "plot" in prompt:
-        return "chart"
+Dataset columns:
+{columns}
 
-    if "summary" in prompt or "describe" in prompt:
-        return "summary"
+User request:
+{prompt}
 
-    if "clean" in prompt:
-        return "clean"
+Return ONLY one word from this list:
+chart
+summary
+correlation
+"""
 
-    return "summary"
+    try:
+        response = model.generate_content(context)
+        result = response.text.strip().lower()
+    except:
+        result = "summary"
 
-
-# -------- CHART GENERATOR -------- #
-
-def create_chart(df):
-
-    numeric_cols = df.select_dtypes(include=np.number).columns
-
-    if len(numeric_cols) >= 2:
-        x = numeric_cols[0]
-        y = numeric_cols[1]
-    else:
-        return "Not enough numeric columns"
-
-    fig = px.bar(df, x=x, y=y)
-
-    return fig.to_html()
+    return result
 
 
-# -------- MAIN API -------- #
+# -------- HOME PAGE -------- #
+
+@app.route("/")
+def home():
+
+    return """
+    <html>
+    <head>
+
+    <title>AI Data Analyst</title>
+
+    <style>
+
+    body{
+        font-family: Arial;
+        text-align:center;
+        background:#f2f2f2;
+        padding:40px;
+    }
+
+    h1{
+        color:#333;
+    }
+
+    input,button{
+        padding:10px;
+        margin:10px;
+    }
+
+    </style>
+
+    </head>
+
+    <body>
+
+    <h1>AI Data Analyst</h1>
+
+    <form action="/analyze" method="post" enctype="multipart/form-data">
+
+    <input type="file" name="file" required><br>
+
+    <input type="text" name="prompt" placeholder="example: show sales chart"><br>
+
+    <button type="submit">Analyze</button>
+
+    </form>
+
+    </body>
+    </html>
+    """
+
+
+# -------- ANALYSIS -------- #
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
@@ -96,35 +148,51 @@ def analyze():
         df = pd.read_excel(file)
 
     else:
-        return jsonify({"error": "Unsupported file format"})
+        return "Unsupported file type"
 
-    # clean data
+    # data cleaning
     df = clean_data(df)
 
-    # remove outliers
+    # outlier removal
     df = remove_outliers(df)
 
-    # understand prompt
-    task = interpret_prompt(prompt)
+    columns = list(df.columns)
 
-    if task == "summary":
+    # prompt understanding
+    task = interpret_prompt(prompt, columns)
 
-        result = df.describe().to_html()
+    # SUMMARY
+    if "summary" in task:
 
-        return result
+        return """
+        <h2>Dataset Summary</h2>
+        """ + df.describe().to_html()
 
-    if task == "chart":
+    # CORRELATION
+    if "correlation" in task:
 
-        chart = create_chart(df)
+        corr = df.corr(numeric_only=True)
 
-        return chart
+        fig = px.imshow(corr)
 
-    if task == "clean":
+        return fig.to_html()
 
-        return df.head().to_html()
+    # CHART
+    if "chart" in task:
+
+        numeric_cols = df.select_dtypes(include=np.number).columns
+
+        if len(numeric_cols) < 2:
+            return "Not enough numeric columns for chart"
+
+        fig = px.bar(df, x=numeric_cols[0], y=numeric_cols[1])
+
+        return fig.to_html()
+
+    return df.head().to_html()
 
 
 # -------- RUN SERVER -------- #
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=10000)
