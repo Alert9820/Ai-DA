@@ -4,3 +4,4 @@ numpy
 plotly
 openpyxl
 gunicorn
+google-generativeai
