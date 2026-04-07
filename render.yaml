@@ -31,11 +31,14 @@ services:
       - key: SLACK_WEBHOOK_URL
         sync: false
     healthCheckPath: /
+    # Specify Python version
+    buildFilter:
+      runtime: python3.12
 
   - type: redis
     name: ai-data-redis
-    ipAllowList: []  # allow all internal connections
-    plan: free  # upgrade for production
+    ipAllowList: []
+    plan: free
 
   - type: worker
     name: ai-data-celery
@@ -50,6 +53,8 @@ services:
           property: connectionString
       - key: GEMINI_API_KEY
         sync: false
+    buildFilter:
+      runtime: python3.12
 
 databases:
   - name: ai-data-db
