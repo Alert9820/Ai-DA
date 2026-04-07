@@ -2,6 +2,7 @@ services:
   - type: web
     name: ai-data-analyst
     runtime: python
+    pythonVersion: 3.11.12
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
     envVars:
@@ -31,9 +32,6 @@ services:
       - key: SLACK_WEBHOOK_URL
         sync: false
     healthCheckPath: /
-    # Specify Python version
-    buildFilter:
-      runtime: python3.12
 
   - type: redis
     name: ai-data-redis
@@ -43,6 +41,7 @@ services:
   - type: worker
     name: ai-data-celery
     runtime: python
+    pythonVersion: 3.11.12
     buildCommand: pip install -r requirements.txt
     startCommand: celery -A app.celery worker --loglevel=info
     envVars:
@@ -53,8 +52,10 @@ services:
           property: connectionString
       - key: GEMINI_API_KEY
         sync: false
-    buildFilter:
-      runtime: python3.12
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ai-data-db
+          property: connectionString
 
 databases:
   - name: ai-data-db
