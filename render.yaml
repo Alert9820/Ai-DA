@@ -4,3 +4,54 @@ services:
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ai-data-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: ai-data-redis
+          property: connectionString
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+    healthCheckPath: /
+
+  - type: redis
+    name: ai-data-redis
+    ipAllowList: []  # allow all internal connections
+    plan: free  # upgrade for production
+
+  - type: worker
+    name: ai-data-celery
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A app.celery worker --loglevel=info
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: ai-data-redis
+          property: connectionString
+      - key: GEMINI_API_KEY
+        sync: false
+
+databases:
+  - name: ai-data-db
+    databaseName: ai_analyst
+    plan: free
