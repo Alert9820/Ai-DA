@@ -23,29 +23,25 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+CORS(app)  # <-- IMPORTANT: allows frontend to call backend
 
 app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024 * 1024  # 2GB
 app.config['UPLOAD_FOLDER'] = '/tmp/uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Gemini AI setup
-genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
+# Gemini AI setup (use your key directly or via env)
+API_KEY = os.getenv('GEMINI_API_KEY', 'AIzaSyA_DlEDZO-tArFm_xbBMpujW5Zr4A8aBEA')
+genai.configure(api_key=API_KEY)
 gemini_model = genai.GenerativeModel('gemini-1.5-flash')
 
-# Store processing status (in-memory, for demo)
 processing_status = {}
 
-# ----------------------------------------------------------------------
-# Data Cleaning Functions
-# ----------------------------------------------------------------------
+# ------------------- DATA CLEANING -------------------
 def auto_clean_data(df, log):
-    """Automatically clean dataframe and record changes in log."""
     original_shape = df.shape
     log['initial_rows'] = original_shape[0]
     log['initial_cols'] = original_shape[1]
 
-    # 1. Duplicates
     dup_count = df.duplicated().sum()
     if dup_count > 0:
         df = df.drop_duplicates()
@@ -53,7 +49,6 @@ def auto_clean_data(df, log):
     else:
         log['duplicates_removed'] = 0
 
-    # 2. Missing values
     missing_before = df.isnull().sum().to_dict()
     log['missing_before'] = {k: int(v) for k, v in missing_before.items() if v > 0}
     log['missing_fill_method'] = {}
@@ -73,7 +68,6 @@ def auto_clean_data(df, log):
                     df[col].fillna('Unknown', inplace=True)
                     log['missing_fill_method'][col] = 'filled with "Unknown"'
 
-    # 3. Outlier capping (IQR)
     outlier_log = {}
     numeric_cols = df.select_dtypes(include=[np.number]).columns
     for col in numeric_cols:
@@ -88,18 +82,15 @@ def auto_clean_data(df, log):
             outlier_log[col] = int(outlier_count)
     log['outliers_capped'] = outlier_log
 
-    # 4. Data type conversion (datetime, numeric)
     type_changes = {}
     for col in df.columns:
         if df[col].dtype == 'object':
-            # Try datetime
             try:
                 df[col] = pd.to_datetime(df[col])
                 type_changes[col] = 'datetime'
                 continue
             except:
                 pass
-            # Try numeric
             try:
                 df[col] = pd.to_numeric(df[col])
                 type_changes[col] = 'numeric'
@@ -111,52 +102,39 @@ def auto_clean_data(df, log):
     log['final_cols'] = df.shape[1]
     return df, log
 
-# ----------------------------------------------------------------------
-# Visualization Functions
-# ----------------------------------------------------------------------
+# ------------------- VISUALIZATIONS -------------------
 def generate_visualizations(df):
-    """Return dict of Plotly HTML snippets."""
     charts = {}
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     date_cols = df.select_dtypes(include=['datetime64']).columns.tolist()
 
-    # Correlation heatmap
     if len(numeric_cols) >= 2:
         corr = df[numeric_cols].corr()
-        fig = px.imshow(corr, text_auto=True, aspect='auto',
-                        color_continuous_scale='RdBu_r',
-                        title='Correlation Heatmap')
+        fig = px.imshow(corr, text_auto=True, aspect='auto', color_continuous_scale='RdBu_r', title='Correlation Heatmap')
         fig.update_layout(height=500, template='plotly_white')
         charts['correlation_heatmap'] = fig.to_html(full_html=False)
 
-    # Distribution + box plots for first 4 numeric columns
     for col in numeric_cols[:4]:
         fig = px.histogram(df, x=col, marginal='box', title=f'Distribution of {col}')
         fig.update_layout(height=450, template='plotly_white')
         charts[f'distribution_{col}'] = fig.to_html(full_html=False)
 
-    # Box plots for outliers (same columns)
     for col in numeric_cols[:4]:
         fig = px.box(df, y=col, title=f'Box Plot - {col}', points='outliers')
         fig.update_layout(height=400, template='plotly_white')
         charts[f'boxplot_{col}'] = fig.to_html(full_html=False)
 
-    # Time series if date column exists
     if date_cols and numeric_cols:
         for date_col in date_cols[:1]:
             for num_col in numeric_cols[:2]:
-                fig = px.line(df, x=date_col, y=num_col,
-                              title=f'{num_col} over {date_col}')
+                fig = px.line(df, x=date_col, y=num_col, title=f'{num_col} over {date_col}')
                 fig.update_layout(height=450, template='plotly_white')
                 charts[f'timeseries_{date_col}_{num_col}'] = fig.to_html(full_html=False)
 
     return charts
 
-# ----------------------------------------------------------------------
-# Gemini AI Q&A
-# ----------------------------------------------------------------------
+# ------------------- GEMINI Q&A -------------------
 def ask_gemini_about_data(df, log, user_question):
-    """Get AI answer about data quality and cleaning."""
     cleaning_summary = f"""
     Initial: {log['initial_rows']} rows, {log['initial_cols']} cols.
     Duplicates removed: {log['duplicates_removed']}
@@ -182,24 +160,19 @@ def ask_gemini_about_data(df, log, user_question):
     except Exception as e:
         return f"AI error: {str(e)}"
 
-# ----------------------------------------------------------------------
-# Report Generation (HTML & PDF)
-# ----------------------------------------------------------------------
+# ------------------- REPORTS -------------------
 def generate_html_report(df, log, charts, ai_insights):
-    """Generate complete HTML report."""
     html = f"""
     <!DOCTYPE html>
     <html>
-    <head>
-        <title>Data Cleaning Report</title>
-        <style>
-            body {{ font-family: Arial, sans-serif; margin: 40px; }}
-            h1 {{ color: #2c3e50; }}
-            table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
-            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-            th {{ background-color: #f2f2f2; }}
-            .chart {{ margin: 30px 0; }}
-        </style>
+    <head><title>Data Cleaning Report</title>
+    <style>
+        body {{ font-family: Arial; margin: 40px; }}
+        table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
+        th, td {{ border: 1px solid #ddd; padding: 8px; }}
+        th {{ background: #f2f2f2; }}
+        .chart {{ margin: 30px 0; }}
+    </style>
     </head>
     <body>
         <h1>📊 Automated Data Cleaning Report</h1>
@@ -211,14 +184,13 @@ def generate_html_report(df, log, charts, ai_insights):
             <tr><td>Initial columns</td><td>{log.get('initial_cols', 'N/A')}</td></tr>
             <tr><td>Duplicates removed</td><td>{log.get('duplicates_removed', 0)}</td></tr>
             <tr><td>Missing values (before)</td><td>{log.get('missing_before', {})}</td></tr>
-            <tr><td>Missing values filled</td><td>{log.get('missing_fill_method', {})}</td></tr>
+            <tr><td>Missing filled</td><td>{log.get('missing_fill_method', {})}</td></tr>
             <tr><td>Outliers capped</td><td>{log.get('outliers_capped', {})}</td></tr>
             <tr><td>Data type changes</td><td>{log.get('type_changes', {})}</td></tr>
             <tr><td>Final rows</td><td>{log.get('final_rows', 'N/A')}</td></tr>
             <tr><td>Final columns</td><td>{log.get('final_cols', 'N/A')}</td></tr>
         </table>
-        <h2>🤖 AI Insights</h2>
-        <p>{ai_insights}</p>
+        <h2>🤖 AI Insights</h2><p>{ai_insights}</p>
         <h2>📈 Visualizations</h2>
     """
     for name, chart_html in charts.items():
@@ -227,43 +199,35 @@ def generate_html_report(df, log, charts, ai_insights):
     return html
 
 def generate_pdf_report(df, log, charts, ai_insights, filename='report.pdf'):
-    """Generate PDF report using ReportLab."""
     doc = SimpleDocTemplate(filename, pagesize=letter)
     styles = getSampleStyleSheet()
     story = []
     story.append(Paragraph("Automated Data Cleaning Report", styles['Title']))
-    story.append(Spacer(1, 12))
+    story.append(Spacer(1,12))
     story.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
-    story.append(Spacer(1, 12))
-
-    data = [
-        ['Metric', 'Details'],
-        ['Initial rows', str(log.get('initial_rows', 'N/A'))],
-        ['Initial columns', str(log.get('initial_cols', 'N/A'))],
-        ['Duplicates removed', str(log.get('duplicates_removed', 0))],
-        ['Missing before', str(log.get('missing_before', {}))],
-        ['Missing filled', str(log.get('missing_fill_method', {}))],
-        ['Outliers capped', str(log.get('outliers_capped', {}))],
-        ['Type changes', str(log.get('type_changes', {}))],
-        ['Final rows', str(log.get('final_rows', 'N/A'))],
-        ['Final columns', str(log.get('final_cols', 'N/A'))],
-    ]
-    table = Table(data, colWidths=[2*inch, 4*inch])
-    table.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.grey),
-                               ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
-                               ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-                               ('GRID', (0,0), (-1,-1), 1, colors.black)]))
+    data = [['Metric','Details'],
+            ['Initial rows',str(log.get('initial_rows','N/A'))],
+            ['Initial columns',str(log.get('initial_cols','N/A'))],
+            ['Duplicates removed',str(log.get('duplicates_removed',0))],
+            ['Missing before',str(log.get('missing_before',{}))],
+            ['Missing filled',str(log.get('missing_fill_method',{}))],
+            ['Outliers capped',str(log.get('outliers_capped',{}))],
+            ['Type changes',str(log.get('type_changes',{}))],
+            ['Final rows',str(log.get('final_rows','N/A'))],
+            ['Final columns',str(log.get('final_cols','N/A'))]]
+    table = Table(data, colWidths=[2*inch,4*inch])
+    table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.grey),
+                               ('TEXTCOLOR',(0,0),(-1,0),colors.whitesmoke),
+                               ('ALIGN',(0,0),(-1,-1),'LEFT'),
+                               ('GRID',(0,0),(-1,-1),1,colors.black)]))
     story.append(table)
-    story.append(Spacer(1, 12))
+    story.append(Spacer(1,12))
     story.append(Paragraph("AI Insights", styles['Heading2']))
     story.append(Paragraph(ai_insights, styles['Normal']))
-    story.append(Paragraph("Note: Interactive charts are available in HTML report.", styles['Italic']))
     doc.build(story)
     return filename
 
-# ----------------------------------------------------------------------
-# Flask Routes
-# ----------------------------------------------------------------------
+# ------------------- FLASK ROUTES -------------------
 @app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE)
@@ -280,11 +244,9 @@ def upload_file():
     temp_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{session_id}_{secure_filename(file.filename)}")
     file.save(temp_path)
 
-    # Start background processing
     thread = threading.Thread(target=process_file, args=(session_id, temp_path))
     thread.daemon = True
     thread.start()
-
     return jsonify({'session_id': session_id, 'status': 'processing'})
 
 def process_file(session_id, filepath):
@@ -310,7 +272,6 @@ def process_file(session_id, filepath):
         status['progress'] = 80
         status['charts'] = charts
 
-        # Store cleaned data
         csv_buffer = StringIO()
         df_clean.to_csv(csv_buffer, index=False)
         status['cleaned_data_csv'] = csv_buffer.getvalue()
@@ -324,10 +285,8 @@ def process_file(session_id, filepath):
     except Exception as e:
         status['error'] = str(e)
     finally:
-        try:
-            os.remove(filepath)
-        except:
-            pass
+        try: os.remove(filepath)
+        except: pass
         processing_status[session_id] = status
 
 @app.route('/status/<session_id>')
@@ -335,15 +294,14 @@ def get_status(session_id):
     status = processing_status.get(session_id)
     if not status:
         return jsonify({'error': 'Invalid session'}), 404
-    result = {
+    return jsonify({
         'progress': status.get('progress', 0),
         'error': status.get('error'),
         'log': status.get('log'),
         'charts': status.get('charts'),
         'df_sample': status.get('df_sample'),
         'ready': status.get('progress') == 100
-    }
-    return jsonify(result)
+    })
 
 @app.route('/ask_gemini', methods=['POST'])
 def ask_gemini():
@@ -358,7 +316,7 @@ def ask_gemini():
     try:
         csv_data = status.get('cleaned_data_csv')
         if not csv_data:
-            return jsonify({'error': 'No cleaned data found'}), 400
+            return jsonify({'error': 'No cleaned data'}), 400
         df = pd.read_csv(StringIO(csv_data))
         log = status.get('log', {})
         answer = ask_gemini_about_data(df, log, question)
@@ -372,17 +330,9 @@ def download_cleaned(session_id, filetype):
     if not status or status.get('progress') != 100:
         return jsonify({'error': 'Data not ready'}), 400
     if filetype == 'csv':
-        csv_data = status.get('cleaned_data_csv')
-        if not csv_data:
-            return jsonify({'error': 'CSV data missing'}), 404
-        return send_file(BytesIO(csv_data.encode()), mimetype='text/csv',
-                         as_attachment=True, download_name='cleaned_data.csv')
+        return send_file(BytesIO(status['cleaned_data_csv'].encode()), mimetype='text/csv', as_attachment=True, download_name='cleaned_data.csv')
     elif filetype == 'excel':
-        excel_data = status.get('cleaned_data_excel')
-        if not excel_data:
-            return jsonify({'error': 'Excel data missing'}), 404
-        return send_file(BytesIO(excel_data), mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                         as_attachment=True, download_name='cleaned_data.xlsx')
+        return send_file(BytesIO(status['cleaned_data_excel']), mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', as_attachment=True, download_name='cleaned_data.xlsx')
     else:
         return jsonify({'error': 'Invalid filetype'}), 400
 
@@ -392,28 +342,23 @@ def download_report(session_id, format):
     if not status or status.get('progress') != 100:
         return jsonify({'error': 'Data not ready'}), 400
     try:
-        csv_data = status.get('cleaned_data_csv')
-        df = pd.read_csv(StringIO(csv_data))
-        log = status.get('log', {})
-        charts = status.get('charts', {})
+        df = pd.read_csv(StringIO(status['cleaned_data_csv']))
+        log = status['log']
+        charts = status['charts']
         ai_summary = ask_gemini_about_data(df, log, "Provide a concise summary of data quality and cleaning effectiveness.")
         if format == 'html':
-            html_report = generate_html_report(df, log, charts, ai_summary)
-            return send_file(BytesIO(html_report.encode()), mimetype='text/html',
-                             as_attachment=True, download_name='data_cleaning_report.html')
+            html = generate_html_report(df, log, charts, ai_summary)
+            return send_file(BytesIO(html.encode()), mimetype='text/html', as_attachment=True, download_name='report.html')
         elif format == 'pdf':
             pdf_path = f"/tmp/report_{session_id}.pdf"
             generate_pdf_report(df, log, charts, ai_summary, pdf_path)
-            return send_file(pdf_path, mimetype='application/pdf',
-                             as_attachment=True, download_name='data_cleaning_report.pdf')
+            return send_file(pdf_path, mimetype='application/pdf', as_attachment=True, download_name='report.pdf')
         else:
             return jsonify({'error': 'Invalid format'}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ----------------------------------------------------------------------
-# HTML Template (Modern, Dark/Light, Drag & Drop)
-# ----------------------------------------------------------------------
+# ------------------- HTML TEMPLATE (embedded) -------------------
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
