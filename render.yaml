@@ -6,5 +6,5 @@ services:
     startCommand: gunicorn app:app
     envVars:
       - key: GEMINI_API_KEY
-        sync: false
+        value: AIzaSyA_DlEDZO-tArFm_xbBMpujW5Zr4A8aBEA
     plan: free
