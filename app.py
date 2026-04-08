@@ -24,7 +24,6 @@ import plotly.graph_objects as go
 import plotly.utils
 import google.generativeai as genai
 from scipy import stats
-from sklearn.ensemble import IsolationForest
 
 # For PDF report
 from reportlab.lib.pagesizes import letter
@@ -347,9 +346,6 @@ def process_file(session_id, filepath):
         status['progress'] = 10
         ext = filepath.split('.')[-1].lower()
         if ext == 'csv':
-            # Use chunks to avoid memory issues, but we need full df for cleaning; 
-            # For very large files, we'll read in chunks and then combine? 
-            # Simpler: use low_memory=False but for 1GB+ might be heavy. We'll read normally.
             df = pd.read_csv(filepath, low_memory=False)
         elif ext in ['xls', 'xlsx']:
             df = pd.read_excel(filepath)
